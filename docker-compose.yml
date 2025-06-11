@@ -79,6 +79,8 @@ services:
         tty: true
         cap_add:
             - NET_ADMIN
+        volumes:
+                - ./volumes:/volumes
         networks:
             net-10.9.0.0:
                 ipv4_address: 10.9.0.99
