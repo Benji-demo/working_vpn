@@ -7,6 +7,7 @@ from PyQt5.QtCore import Qt, QTimer
 import sys
 import subprocess
 import requests
+import os
 
 
 def get_ip():
@@ -188,30 +189,16 @@ class VPNApp(QWidget):
                 }
             """)
             msg.exec_()
-
             return
 
         if not self.connected:
             try:
                 self.vpn_process = subprocess.Popen(
-                    ["python3", "tun_client_sec.py", password],
+                    ["sudo", "python3", "tun_client_sec.py", password],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-                self.status_label.setText("Connected")
-                self.status_label.setStyleSheet("color: #66ff99;")
-                self.explain_label.setText("Your internet is private.")
-                self.connect_button.setStyleSheet("""
-                    QPushButton {
-                        border-radius: 70px;
-                        background-color: #bfaaff;
-                        color: #1e1e2f;
-                    }
-                    QPushButton:hover {
-                        background-color: #d2bfff;
-                    }
-                """)
-                self.connected = True
+                QTimer.singleShot(1500, self.check_vpn_status)
             except Exception as e:
                 QMessageBox.critical(self, "Connection Error", f"Failed to start VPN client.\n\n{str(e)}")
         else:
@@ -234,6 +221,31 @@ class VPNApp(QWidget):
                 }
             """)
             self.connected = False
+
+    def check_vpn_status(self):
+        if os.path.exists("/tmp/vpn_connected"):
+            self.status_label.setText("Connected")
+            self.status_label.setStyleSheet("color: #66ff99;")
+            self.explain_label.setText("Your internet is private.")
+            self.connect_button.setStyleSheet("""
+                QPushButton {
+                    border-radius: 70px;
+                    background-color: #bfaaff;
+                    color: #1e1e2f;
+                }
+                QPushButton:hover {
+                    background-color: #d2bfff;
+                }
+            """)
+            self.connected = True
+        else:
+            self.status_label.setText("Connection Failed")
+            self.status_label.setStyleSheet("color: #ff6666;")
+            self.explain_label.setText("Could not verify VPN connection.")
+            self.connected = False
+            if self.vpn_process:
+                self.vpn_process.terminate()
+                self.vpn_process = None
 
     def closeEvent(self, event):
         if self.vpn_process:

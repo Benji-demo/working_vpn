@@ -144,7 +144,7 @@ class VPNApp(QWidget):
         if not self.connected:
             try:
                 self.vpn_process = subprocess.Popen(
-                    ["python3", "tun_client.py"],
+                    ["sudo", "python3", "tun_client.py"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
