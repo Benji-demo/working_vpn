@@ -239,7 +239,7 @@ class VPNApp(QWidget):
             """)
             self.connected = True
         else:
-            self.status_label.setText("Connection Failed")
+            self.status_label.setText("Not Connected")
             self.status_label.setStyleSheet("color: #ff6666;")
             self.explain_label.setText("Could not verify VPN connection.")
             self.connected = False
