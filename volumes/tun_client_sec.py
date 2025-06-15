@@ -3,7 +3,7 @@
 import os, fcntl, struct, socket, select, hashlib, sys, atexit
 from scapy.all import *
 
-SECRET = sys.argv[1].encode() if len(sys.argv) > 1 else b"defaultpass"
+SECRET = sys.stdin.readline().strip().encode()
 
 def add_hash(packet):
     h = hashlib.sha256(SECRET + packet).digest()
@@ -16,10 +16,8 @@ def verify_hash(data):
     calc_hash = hashlib.sha256(SECRET + packet).digest()
     return (recv_hash == calc_hash), packet
 
-def cleanup(ifname, status_file):
+def cleanup(ifname):
     os.system(f"ip link del {ifname} 2>/dev/null")
-    if os.path.exists(status_file):
-        os.remove(status_file)
 
 # === TUN Setup ===
 TUNSETIFF = 0x400454ca
@@ -32,7 +30,7 @@ ifname = fcntl.ioctl(tun, TUNSETIFF, ifr).decode('UTF-8')[:16].strip('\x00')
 print("TUN interface:", ifname)
 
 os.system(f"ip link set dev {ifname} up")
-os.system(f"ip route add 192.168.60.0/24 dev {ifname}")
+os.system(f"ip route add 192.168.53.0/24 dev {ifname}")
 
 # === UDP Setup ===
 SERVER_IP = "10.9.0.11"
@@ -44,31 +42,29 @@ auth_msg = b'AUTH:' + SECRET
 sock.sendto(add_hash(auth_msg), (SERVER_IP, SERVER_PORT))
 print("🔐 Sent authentication packet")
 
-# === Step 2: Wait for ASSIGN_IP
+# === Step 2: Wait for ASSIGN_IP or NO_IP ===
 while True:
     data, _ = sock.recvfrom(2048)
     ok, packet = verify_hash(data)
     if ok and packet.startswith(b"ASSIGN_IP:"):
         client_ip = packet.decode().split(":")[1]
         print(f"✅ Assigned IP from server: {client_ip}")
+        print("AUTH_RESULT:True", flush=True)
+        print(f"ASSIGN_IP:{client_ip}", flush=True)
         break
     elif ok and packet.startswith(b"NO_IPS_AVAILABLE"):
         print("❌ Server has no IPs left to assign.")
+        print("AUTH_RESULT:False", flush=True)
         sys.exit(1)
     else:
         print("⏳ Waiting for valid IP assignment...")
 
-# === Step 3: Configure the TUN interface with assigned IP
+# === Step 3: Configure the TUN interface
 os.system(f"ip addr add {client_ip}/24 dev {ifname}")
 
-# === Step 4: Create status file
-status_file = os.path.join(os.path.dirname(__file__), "vpn_connected")
-with open(status_file, "w") as f:
-    f.write("ok")
+atexit.register(cleanup, ifname)
 
-atexit.register(cleanup, ifname, status_file)
-
-# === Step 5: Main loop
+# === Step 4: Main loop ===
 while True:
     ready, _, _ = select.select([tun, sock], [], [])
     for fd in ready:

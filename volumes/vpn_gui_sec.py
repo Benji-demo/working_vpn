@@ -157,7 +157,8 @@ class VPNApp(QWidget):
         QTimer.singleShot(500, self.update_ip)
 
     def update_ip(self):
-        self.ip_label.setText(f"🌐 {get_ip()}")
+        self.default_ip = "10.9.0.5"
+        self.ip_label.setText(f"🌐 {self.default_ip}")
 
     def toggle_vpn(self):
         password = self.password_input.text().strip()
@@ -193,15 +194,16 @@ class VPNApp(QWidget):
 
         if not self.connected:
             try:
-#                 self.vpn_process = subprocess.Popen([
-#     "gnome-terminal", "--", "sudo", "python3", "tun_client_sec.py", password
-# ])
                 self.vpn_process = subprocess.Popen(
-                    ["sudo", "python3", "tun_client_sec.py", password],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    ["sudo", "python3", "tun_client_sec.py"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True
                 )
-                QTimer.singleShot(15000, self.check_vpn_status)
+                self.vpn_process.stdin.write(password + "\n")
+                self.vpn_process.stdin.flush()
+                QTimer.singleShot(1000, self.check_vpn_output)
             except Exception as e:
                 QMessageBox.critical(self, "Connection Error", f"Failed to start VPN client.\n\n{str(e)}")
         else:
@@ -225,30 +227,45 @@ class VPNApp(QWidget):
             """)
             self.connected = False
 
-    def check_vpn_status(self):
-        if os.path.exists("vpn_connected"):
-            self.status_label.setText("Connected")
-            self.status_label.setStyleSheet("color: #66ff99;")
-            self.explain_label.setText("Your internet is private.")
-            self.connect_button.setStyleSheet("""
-                QPushButton {
-                    border-radius: 70px;
-                    background-color: #bfaaff;
-                    color: #1e1e2f;
-                }
-                QPushButton:hover {
-                    background-color: #d2bfff;
-                }
-            """)
-            self.connected = True
-        else:
-            self.status_label.setText("Not Connected")
-            self.status_label.setStyleSheet("color: #ff6666;")
-            self.explain_label.setText("Could not verify VPN connection.")
-            self.connected = False
-            if self.vpn_process:
-                self.vpn_process.terminate()
-                self.vpn_process = None
+    def check_vpn_output(self):
+        if self.vpn_process and self.vpn_process.stdout:
+            try:
+                for _ in range(10):
+                    line = self.vpn_process.stdout.readline()
+                    if not line:
+                        break
+                    if "AUTH_RESULT:True" in line:
+                        self.status_label.setText("Connected")
+                        self.status_label.setStyleSheet("color: #66ff99;")
+                        self.explain_label.setText("Your internet is private.")
+                        self.connect_button.setStyleSheet("""
+                            QPushButton {
+                                border-radius: 70px;
+                                background-color: #bfaaff;
+                                color: #1e1e2f;
+                            }
+                            QPushButton:hover {
+                                background-color: #d2bfff;
+                            }
+                        """)
+                        self.connected = True
+                        continue
+
+                    elif line.startswith("ASSIGN_IP:"):
+                        assigned_ip = line.strip().split(":")[1]
+                        self.ip_label.setText(f"🌐 {assigned_ip}")
+                        continue
+                    
+                    elif "AUTH_RESULT:False" in line:
+                        self.status_label.setText("❌ Not Connected")
+                        self.status_label.setStyleSheet("color: #ff6666;")
+                        self.explain_label.setText("Could not verify VPN connection.")
+                        self.connected = False
+                        self.vpn_process.terminate()
+                        self.vpn_process = None
+                        return
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"VPN output error:\n{str(e)}")
 
     def closeEvent(self, event):
         if self.vpn_process:
