@@ -33,7 +33,7 @@ ifname = fcntl.ioctl(tun, TUNSETIFF, ifr).decode('UTF-8')[:16].strip('\x00')
 print("TUN interface:", ifname)
 
 os.system(f"ip link set dev {ifname} up")
-os.system(f"ip route add 192.168.60.0/24 dev {ifname}")
+os.system(f"ip route add 192.168.53.0/24 dev {ifname}")
 
 # === UDP Setup ===
 SERVER_IP = "10.9.0.11"
