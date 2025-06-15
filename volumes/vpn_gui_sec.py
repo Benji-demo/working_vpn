@@ -32,6 +32,11 @@ class VPNOutputReader(QThread):
 
     def stop(self):
         self.running = False
+        if self.process and self.process.stdout:
+            try:
+                self.process.stdout.close()
+            except:
+                pass
         self.quit()
         self.wait()
 
@@ -70,13 +75,12 @@ class VPNApp(QWidget):
 
         container = QWidget()
         container.setStyleSheet("background-color: #1e1e2f; border-radius: 20px;")
-
         layout = QVBoxLayout(container)
         layout.setAlignment(Qt.AlignTop)
 
+        # Title bar
         title_bar = QHBoxLayout()
         title_bar.setContentsMargins(25, 15, 20, 0)
-
         title_label = QLabel("Vortex")
         title_label.setFont(QFont("Arial", 18, QFont.Bold))
         title_label.setStyleSheet("color: #bfaaff;")
@@ -94,13 +98,12 @@ class VPNApp(QWidget):
         btn_close.setStyleSheet("QPushButton { background: #aa4444; color: white; border-radius: 14px; font-size: 18px; }"
                                 "QPushButton:hover { background: #ff5555; }")
         btn_close.clicked.connect(self.close)
-
         title_bar.addWidget(btn_min)
         title_bar.addWidget(btn_close)
         layout.addLayout(title_bar)
-
         layout.addSpacing(120)
 
+        # Password input
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
         self.password_input.setPlaceholderText("VPN Password")
@@ -119,6 +122,7 @@ class VPNApp(QWidget):
         layout.addWidget(self.password_input, alignment=Qt.AlignCenter)
         layout.addSpacing(65)
 
+        # Connect/Disconnect button
         self.connect_button = QPushButton("⏻")
         self.connect_button.setFont(QFont("Arial", 36))
         self.connect_button.setFixedSize(140, 140)
@@ -133,8 +137,7 @@ class VPNApp(QWidget):
                 background-color: #4a4a65;
             }
         """)
-        layout.addWidget(self.connect_button, alignment=Qt.AlignCenter)
-        layout.addSpacing(30)
+        self.connect_button.clicked.connect(self.toggle_vpn)
 
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(40)
@@ -142,7 +145,8 @@ class VPNApp(QWidget):
         shadow.setColor(QColor(191, 170, 255, 80))
         self.connect_button.setGraphicsEffect(shadow)
 
-        self.connect_button.clicked.connect(self.toggle_vpn)
+        layout.addWidget(self.connect_button, alignment=Qt.AlignCenter)
+        layout.addSpacing(30)
 
         self.status_label = QLabel("Not Connected")
         self.status_label.setFont(QFont("Arial", 14, QFont.Bold))
@@ -157,7 +161,6 @@ class VPNApp(QWidget):
         layout.addWidget(self.explain_label)
 
         layout.addStretch()
-
         self.ip_label = QLabel("Fetching IP...")
         self.ip_label.setFont(QFont("Arial", 11))
         self.ip_label.setStyleSheet("color: #bfaaff; margin-bottom: 20px;")
@@ -166,46 +169,45 @@ class VPNApp(QWidget):
 
         main_layout.addWidget(container)
         self.setLayout(main_layout)
-
         QTimer.singleShot(500, self.update_ip)
 
     def update_ip(self):
         self.default_ip = "10.9.0.5"
-        self.ip_label.setText(f"🌐 {self.default_ip}")
+        self.ip_label.setText(f"IP: {self.default_ip}")
 
     def toggle_vpn(self):
         password = self.password_input.text().strip()
-        if not password or len(password) < 4:
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Warning)
-            msg.setWindowTitle("Invalid Password")
-            msg.setText("Enter a password with at least 4 characters.")
-            msg.setStyleSheet("""
-                QMessageBox {
-                    background-color: #2b2b3d;
-                    color: #bfaaff;
-                    border: 2px solid #444;
-                    font-family: Arial;
-                    font-size: 13px;
-                }
-                QLabel {
-                    color: #bfaaff; 
-                }
-                QPushButton {
-                    background-color: #bfaaff;
-                    color: #1e1e2f;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    min-width: 60px;
-                }
-                QPushButton:hover {
-                    background-color: #d2bfff;
-                }
-            """)
-            msg.exec_()
-            return
-
         if not self.connected:
+            if not password or len(password) < 4:
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Warning)
+                msg.setWindowTitle("Invalid Password")
+                msg.setText("Enter a password with at least 4 characters.")
+                msg.setStyleSheet("""
+                    QMessageBox {
+                        background-color: #2b2b3d;
+                        color: #bfaaff;
+                        border: 2px solid #444;
+                        font-family: Arial;
+                        font-size: 13px;
+                    }
+                    QLabel {
+                        color: #bfaaff;
+                    }
+                    QPushButton {
+                        background-color: #bfaaff;
+                        color: #1e1e2f;
+                        border-radius: 6px;
+                        padding: 6px 12px;
+                        min-width: 60px;
+                    }
+                    QPushButton:hover {
+                        background-color: #d2bfff;
+                    }
+                """)
+                msg.exec_()
+                return
+
             try:
                 self.vpn_process = subprocess.Popen(
                     ["sudo", "python3", "tun_client_sec.py"],
@@ -225,14 +227,18 @@ class VPNApp(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Connection Error", f"Failed to start VPN client.\n\n{str(e)}")
         else:
-            if self.vpn_process:
-                self.vpn_process.terminate()
-                self.vpn_process.wait()
-                self.vpn_process = None
-
             if self.output_thread:
                 self.output_thread.stop()
                 self.output_thread = None
+
+            if self.vpn_process:
+                try:
+                    self.vpn_process.terminate()
+                    self.vpn_process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.vpn_process.kill()
+                finally:
+                    self.vpn_process = None
 
             self.status_label.setText("Not Connected")
             self.status_label.setStyleSheet("color: #ff6666;")
@@ -275,15 +281,18 @@ class VPNApp(QWidget):
                 self.vpn_process = None
 
     def handle_assigned_ip(self, ip):
-        self.ip_label.setText(f"🌐 {ip}")
+        self.ip_label.setText(f"IP: {ip}")
 
     def closeEvent(self, event):
-        if self.vpn_process:
-            self.vpn_process.terminate()
-            self.vpn_process.wait()
         if self.output_thread:
             self.output_thread.stop()
             self.output_thread = None
+        if self.vpn_process:
+            try:
+                self.vpn_process.terminate()
+                self.vpn_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.vpn_process.kill()
         event.accept()
 
     def mousePressEvent(self, event):
