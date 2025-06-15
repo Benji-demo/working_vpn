@@ -59,7 +59,8 @@ ip link show
 - look for one that starts with br - xxxxxxxxxxx
 - then do this ( * packet sniffing *)
 ```bash
-sudo tcpdump -i br -66fc5.....(the one from above) -n -A port 9090 
+sudo tcpdump -i br-xxxx -n -A port 9090   #or
+sudo tcpdump -i any udp port 9090 -A
 ```
 
 - Then telnet to this ip(192.168.60.5) from client vpn and login
