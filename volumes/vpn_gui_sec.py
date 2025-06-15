@@ -3,53 +3,10 @@ from PyQt5.QtWidgets import (
     QPushButton, QLineEdit, QMessageBox, QHBoxLayout, QGraphicsDropShadowEffect
 )
 from PyQt5.QtGui import QFont, QCursor, QColor, QRegion
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer
 import sys
 import subprocess
-
-class VPNOutputReader(QThread):
-    auth_result = pyqtSignal(bool)
-    assigned_ip = pyqtSignal(str)
-
-    def __init__(self, process):
-        super().__init__()
-        self.process = process
-        self.running = True
-
-    def run(self):
-        while self.running and self.process and self.process.stdout:
-            line = self.process.stdout.readline()
-            if not line:
-                break
-            if "AUTH_RESULT:True" in line:
-                self.auth_result.emit(True)
-            elif "AUTH_RESULT:False" in line:
-                self.auth_result.emit(False)
-            elif line.startswith("ASSIGN_IP:"):
-                ip = line.strip().split(":")[1]
-                self.assigned_ip.emit(ip)
-
-    def stop(self):
-        self.running = False
-        self.quit()
-        self.wait()
-
-
-class VPNTerminator(QThread):
-    finished = pyqtSignal()
-
-    def __init__(self, process):
-        super().__init__()
-        self.process = process
-
-    def run(self):
-        try:
-            if self.process:
-                self.process.terminate()
-                self.process.wait()
-        except Exception as e:
-            print(f"Error during termination: {e}")
-        self.finished.emit()
+import os
 
 
 class VPNApp(QWidget):
@@ -62,11 +19,15 @@ class VPNApp(QWidget):
         self.connected = False
         self.drag_position = None
         self.vpn_process = None
-        self.output_thread = None
-        self.terminator_thread = None
+
+        self.BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        self.STATUS_FILE = os.path.join(self.BASE_DIR, "vpn_connected")
+        self.IP_FILE = os.path.join(self.BASE_DIR, "vpn_ip")
+        self.DEFAULT_IP = "10.9.0.5"
 
         self.round_corners()
         self.init_ui()
+        QTimer.singleShot(500, self.load_status)
 
     def round_corners(self):
         radius = 20
@@ -91,6 +52,7 @@ class VPNApp(QWidget):
         layout = QVBoxLayout(container)
         layout.setAlignment(Qt.AlignTop)
 
+        # Title Bar
         title_bar = QHBoxLayout()
         title_bar.setContentsMargins(25, 15, 20, 0)
 
@@ -118,6 +80,7 @@ class VPNApp(QWidget):
 
         layout.addSpacing(120)
 
+        # Password Input
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
         self.password_input.setPlaceholderText("VPN Password")
@@ -136,10 +99,10 @@ class VPNApp(QWidget):
         layout.addWidget(self.password_input, alignment=Qt.AlignCenter)
         layout.addSpacing(65)
 
+        # Connect Button
         self.connect_button = QPushButton("⏻")
         self.connect_button.setFont(QFont("Arial", 36))
         self.connect_button.setFixedSize(140, 140)
-        layout.addWidget(self.connect_button, alignment=Qt.AlignHCenter)
         self.connect_button.setCursor(QCursor(Qt.PointingHandCursor))
         self.connect_button.setStyleSheet("""
             QPushButton {
@@ -154,6 +117,7 @@ class VPNApp(QWidget):
         layout.addWidget(self.connect_button, alignment=Qt.AlignCenter)
         layout.addSpacing(30)
 
+        # Drop shadow effect
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(40)
         shadow.setOffset(0, 0)
@@ -162,12 +126,14 @@ class VPNApp(QWidget):
 
         self.connect_button.clicked.connect(self.toggle_vpn)
 
+        # Status Label
         self.status_label = QLabel("Not Connected")
         self.status_label.setFont(QFont("Arial", 14, QFont.Bold))
         self.status_label.setStyleSheet("color: #ff6666;")
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
 
+        # Explanation Label
         self.explain_label = QLabel("Your internet is not private.")
         self.explain_label.setFont(QFont("Arial", 10))
         self.explain_label.setStyleSheet("color: #bbbbbb;")
@@ -176,7 +142,8 @@ class VPNApp(QWidget):
 
         layout.addStretch()
 
-        self.ip_label = QLabel("Fetching IP...")
+        # IP Label
+        self.ip_label = QLabel(f"IP: {self.DEFAULT_IP}")
         self.ip_label.setFont(QFont("Arial", 11))
         self.ip_label.setStyleSheet("color: #bfaaff; margin-bottom: 20px;")
         self.ip_label.setAlignment(Qt.AlignCenter)
@@ -185,14 +152,47 @@ class VPNApp(QWidget):
         main_layout.addWidget(container)
         self.setLayout(main_layout)
 
-        QTimer.singleShot(500, self.update_ip)
-
-    def update_ip(self, ip=None):
-        if ip:
-            self.ip_label.setText(f"IP: {ip}")
+    def load_status(self):
+        if os.path.exists(self.STATUS_FILE):
+            # Connected
+            self.connected = True
+            self.status_label.setText("Connected")
+            self.status_label.setStyleSheet("color: #66ff99;")
+            self.explain_label.setText("Your internet is private.")
+            self.connect_button.setStyleSheet("""
+                QPushButton {
+                    border-radius: 70px;
+                    background-color: #bfaaff;
+                    color: #1e1e2f;
+                }
+                QPushButton:hover {
+                    background-color: #d2bfff;
+                }
+            """)
+            # Load IP
+            if os.path.exists(self.IP_FILE):
+                with open(self.IP_FILE) as f:
+                    ip = f.read().strip()
+                self.ip_label.setText(f"IP: {ip}")
+            else:
+                self.ip_label.setText(f"IP: {self.DEFAULT_IP}")
         else:
-            self.default_ip = "10.9.0.5"
-            self.ip_label.setText(f"IP: {self.default_ip}")
+            # Not connected
+            self.connected = False
+            self.status_label.setText("Not Connected")
+            self.status_label.setStyleSheet("color: #ff6666;")
+            self.explain_label.setText("Your internet is not private.")
+            self.connect_button.setStyleSheet("""
+                QPushButton {
+                    border-radius: 70px;
+                    background-color: #3a3a50;
+                    color: #bfaaff;
+                }
+                QPushButton:hover {
+                    background-color: #4a4a65;
+                }
+            """)
+            self.ip_label.setText(f"IP: {self.DEFAULT_IP}")
 
     def toggle_vpn(self):
         password = self.password_input.text().strip()
@@ -229,53 +229,33 @@ class VPNApp(QWidget):
         if not self.connected:
             try:
                 self.vpn_process = subprocess.Popen(
-                    ["sudo", "python3", "tun_client_sec.py"],
-                    stdin=subprocess.PIPE,
+                    ["sudo", "python3", "tun_client_sec.py", password],
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True
+                    stderr=subprocess.PIPE
                 )
-                self.vpn_process.stdin.write(password + "\n")
-                self.vpn_process.stdin.flush()
-
-                self.output_thread = VPNOutputReader(self.vpn_process)
-                self.output_thread.auth_result.connect(self.handle_auth_result)
-                self.output_thread.assigned_ip.connect(self.handle_assigned_ip)
-                self.output_thread.start()
-
+                # Wait and then check connection
+                QTimer.singleShot(10000, self.check_vpn_status)
             except Exception as e:
                 QMessageBox.critical(self, "Connection Error", f"Failed to start VPN client.\n\n{str(e)}")
         else:
+            self.disconnect_vpn()
+
+    def check_vpn_status(self):
+        base_dir = os.path.dirname(__file__)
+        auth_failed_file = os.path.join(base_dir, "vpn_auth_failed")
+        connected_file = os.path.join(base_dir, "vpn_connected")
+
+        if os.path.exists(auth_failed_file):
+            self.status_label.setText("Could not verify VPN connection.")
+            self.status_label.setStyleSheet("color: #ff6666;")
+            self.explain_label.setText("Wrong password or authentication failed.")
+            self.connected = False
+            # Kill vpn process if running
             if self.vpn_process:
-                self.terminator_thread = VPNTerminator(self.vpn_process)
-                self.terminator_thread.finished.connect(self.cleanup_after_disconnect)
-                self.terminator_thread.start()
-            else:
-                self.cleanup_after_disconnect()
+                self.vpn_process.terminate()
+                self.vpn_process = None
 
-    def cleanup_after_disconnect(self):
-        if self.output_thread:
-            self.output_thread.stop()
-            self.output_thread = None
-
-        self.vpn_process = None
-        self.status_label.setText("Not Connected")
-        self.status_label.setStyleSheet("color: #ff6666;")
-        self.explain_label.setText("Your internet is not private.")
-        self.connect_button.setStyleSheet("""
-            QPushButton {
-                border-radius: 70px;
-                background-color: #3a3a50;
-                color: #bfaaff;
-            }
-            QPushButton:hover {
-                background-color: #4a4a65;
-            }
-        """)
-        self.connected = False
-
-    def handle_auth_result(self, success):
-        if success:
+        elif os.path.exists(connected_file):
             self.status_label.setText("Connected")
             self.status_label.setStyleSheet("color: #66ff99;")
             self.explain_label.setText("Your internet is private.")
@@ -290,25 +270,45 @@ class VPNApp(QWidget):
                 }
             """)
             self.connected = True
+
         else:
-            self.status_label.setText("\u274c Not Connected")
+            self.status_label.setText("Not Connected")
             self.status_label.setStyleSheet("color: #ff6666;")
-            self.explain_label.setText("Could not verify VPN connection.")
+            self.explain_label.setText("Your internet is not private.")
             self.connected = False
             if self.vpn_process:
                 self.vpn_process.terminate()
                 self.vpn_process = None
 
-    def handle_assigned_ip(self, ip):
-        self.update_ip(ip)
-
-    def closeEvent(self, event):
+    def disconnect_vpn(self):
         if self.vpn_process:
             self.vpn_process.terminate()
             self.vpn_process.wait()
-        if self.output_thread:
-            self.output_thread.stop()
-            self.output_thread = None
+            self.vpn_process = None
+
+        self.status_label.setText("Not Connected")
+        self.status_label.setStyleSheet("color: #ff6666;")
+        self.explain_label.setText("Your internet is not private.")
+        self.connect_button.setStyleSheet("""
+            QPushButton {
+                border-radius: 70px;
+                background-color: #3a3a50;
+                color: #bfaaff;
+            }
+            QPushButton:hover {
+                background-color: #4a4a65;
+            }
+        """)
+        self.ip_label.setText(f"IP: {self.DEFAULT_IP}")
+        self.connected = False
+
+        # Remove status files on disconnect
+        for f in [self.STATUS_FILE, self.IP_FILE]:
+            if os.path.exists(f):
+                os.remove(f)
+
+    def closeEvent(self, event):
+        self.disconnect_vpn()
         event.accept()
 
     def mousePressEvent(self, event):

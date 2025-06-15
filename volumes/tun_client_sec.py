@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
-import os, fcntl, struct, socket, select, hashlib, sys, atexit, signal
+import os, fcntl, struct, socket, select, hashlib, sys, atexit
 from scapy.all import *
 
-# === Secret from stdin ===
-SECRET = sys.stdin.readline().strip().encode()
+SECRET = sys.argv[1].encode() if len(sys.argv) > 1 else b"defaultpass"
 
-# === Hash Functions ===
 def add_hash(packet):
     h = hashlib.sha256(SECRET + packet).digest()
     return packet + h
@@ -18,9 +16,12 @@ def verify_hash(data):
     calc_hash = hashlib.sha256(SECRET + packet).digest()
     return (recv_hash == calc_hash), packet
 
-# === Cleanup function ===
-def cleanup(ifname):
+def cleanup(ifname, connected_file, auth_failed_file):
     os.system(f"ip link del {ifname} 2>/dev/null")
+    if os.path.exists(connected_file):
+        os.remove(connected_file)
+    if os.path.exists(auth_failed_file):
+        os.remove(auth_failed_file)
 
 # === TUN Setup ===
 TUNSETIFF = 0x400454ca
@@ -32,53 +33,66 @@ ifr = struct.pack('16sH', b'bini%d', IFF_TUN | IFF_NO_PI)
 ifname = fcntl.ioctl(tun, TUNSETIFF, ifr).decode('UTF-8')[:16].strip('\x00')
 print("TUN interface:", ifname)
 
-# === Register cleanup ===
-atexit.register(cleanup, ifname)
-
-# === Signal handling for graceful exit ===
-def handle_exit(signum, frame):
-    print(f"\n🔌 Signal {signum} received. Cleaning up and exiting...")
-    cleanup(ifname)
-    sys.exit(0)
-
-signal.signal(signal.SIGTERM, handle_exit)
-signal.signal(signal.SIGINT, handle_exit)
-
-# === Bring up interface and routing ===
 os.system(f"ip link set dev {ifname} up")
-os.system(f"ip route add 192.168.53.0/24 dev {ifname}")
+os.system(f"ip route add 192.168.60.0/24 dev {ifname}")
 
 # === UDP Setup ===
 SERVER_IP = "10.9.0.11"
 SERVER_PORT = 9090
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+# Files to communicate status
+base_dir = os.path.dirname(__file__)
+connected_file = os.path.join(base_dir, "vpn_connected")
+auth_failed_file = os.path.join(base_dir, "vpn_auth_failed")
+
+# Remove any leftover status files
+if os.path.exists(connected_file):
+    os.remove(connected_file)
+if os.path.exists(auth_failed_file):
+    os.remove(auth_failed_file)
+
 # === Step 1: Authenticate ===
 auth_msg = b'AUTH:' + SECRET
 sock.sendto(add_hash(auth_msg), (SERVER_IP, SERVER_PORT))
 print("🔐 Sent authentication packet")
 
-# === Step 2: Wait for ASSIGN_IP or NO_IP ===
+# === Step 2: Wait for ASSIGN_IP or NO_IPS or AUTH_FAIL
 while True:
     data, _ = sock.recvfrom(2048)
     ok, packet = verify_hash(data)
-    if ok and packet.startswith(b"ASSIGN_IP:"):
-        client_ip = packet.decode().split(":")[1]
-        print(f"✅ Assigned IP from server: {client_ip}")
-        print("AUTH_RESULT:True", flush=True)
-        print(f"ASSIGN_IP:{client_ip}", flush=True)
-        break
-    elif ok and packet.startswith(b"NO_IPS_AVAILABLE"):
-        print("❌ Server has no IPs left to assign.")
-        print("AUTH_RESULT:False", flush=True)
-        sys.exit(1)
+    if ok:
+        if packet.startswith(b"ASSIGN_IP:"):
+            client_ip = packet.decode().split(":")[1]
+            print(f"✅ Assigned IP from server: {client_ip}")
+            # Create connected file, remove auth fail file if exists
+            if os.path.exists(auth_failed_file):
+                os.remove(auth_failed_file)
+            with open(connected_file, "w") as f:
+                f.write("ok")
+            break
+        elif packet.startswith(b"NO_IPS_AVAILABLE"):
+            print("❌ Server has no IPs left to assign.")
+            sys.exit(1)
+        elif packet.startswith(b"AUTH_FAIL"):
+            print("❌ Authentication failed: wrong password.")
+            # Create auth_failed file, remove connected file if exists
+            if os.path.exists(connected_file):
+                os.remove(connected_file)
+            with open(auth_failed_file, "w") as f:
+                f.write("fail")
+            sys.exit(1)
+        else:
+            print("⏳ Waiting for valid IP assignment...")
     else:
-        print("⏳ Waiting for valid IP assignment...")
+        print("Packet integrity check failed during auth phase.")
 
-# === Step 3: Configure IP ===
+# === Step 3: Configure the TUN interface with assigned IP
 os.system(f"ip addr add {client_ip}/24 dev {ifname}")
 
-# === Step 4: Main loop ===
+atexit.register(cleanup, ifname, connected_file, auth_failed_file)
+
+# === Step 4: Main loop
 while True:
     ready, _, _ = select.select([tun, sock], [], [])
     for fd in ready:
