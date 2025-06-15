@@ -244,6 +244,7 @@ class VPNApp(QWidget):
                 }
             """)
             self.connected = True
+            self.update_ip()
         else:
             self.status_label.setText("Not Connected")
             self.status_label.setStyleSheet("color: #ff6666;")
