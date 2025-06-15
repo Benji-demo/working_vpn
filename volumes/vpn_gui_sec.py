@@ -10,13 +10,6 @@ import requests
 import os
 
 
-def get_ip():
-    try:
-        return requests.get("https://api.ipify.org").text
-    except:
-        return "IP Unavailable"
-
-
 class VPNApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -27,6 +20,10 @@ class VPNApp(QWidget):
         self.connected = False
         self.drag_position = None
         self.vpn_process = None
+        self.BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        self.IP_FILE = os.path.join(self.BASE_DIR, "vpn_ip")
+        self.STATUS_FILE = os.path.join(self.BASE_DIR, "vpn_connected")
+        self.DEFAULT_IP = "10.9.0.5"
 
         self.round_corners()
         self.init_ui()
@@ -145,7 +142,7 @@ class VPNApp(QWidget):
         layout.addStretch()
 
         # IP Label
-        self.ip_label = QLabel("Fetching IP...")
+        self.ip_label = QLabel(f"IP: {self.DEFAULT_IP}")
         self.ip_label.setFont(QFont("Arial", 11))
         self.ip_label.setStyleSheet("color: #bfaaff; margin-bottom: 20px;")
         self.ip_label.setAlignment(Qt.AlignCenter)
@@ -154,10 +151,13 @@ class VPNApp(QWidget):
         main_layout.addWidget(container)
         self.setLayout(main_layout)
 
-        QTimer.singleShot(500, self.update_ip)
-
     def update_ip(self):
-        self.ip_label.setText(f"🌐 {get_ip()}")
+        if os.path.exists(self.IP_FILE):
+            with open(self.IP_FILE) as f:
+                ip = f.read().strip()
+            self.ip_label.setText(f"IP: {ip}")
+        else:
+            self.ip_label.setText(f"IP: {self.DEFAULT_IP}")
 
     def toggle_vpn(self):
         password = self.password_input.text().strip()
@@ -193,9 +193,6 @@ class VPNApp(QWidget):
 
         if not self.connected:
             try:
-#                 self.vpn_process = subprocess.Popen([
-#     "gnome-terminal", "--", "sudo", "python3", "tun_client_sec.py", password
-# ])
                 self.vpn_process = subprocess.Popen(
                     ["sudo", "python3", "tun_client_sec.py", password],
                     stdout=subprocess.DEVNULL,
@@ -224,6 +221,12 @@ class VPNApp(QWidget):
                 }
             """)
             self.connected = False
+            self.ip_label.setText(f"IP: {self.DEFAULT_IP}")
+
+            # Remove status files on disconnect
+            for f in [self.STATUS_FILE, self.IP_FILE]:
+                if os.path.exists(f):
+                    os.remove(f)
 
     def check_vpn_status(self):
         if os.path.exists("vpn_connected"):
@@ -241,11 +244,18 @@ class VPNApp(QWidget):
                 }
             """)
             self.connected = True
+            self.update_ip()
         else:
             self.status_label.setText("Not Connected")
             self.status_label.setStyleSheet("color: #ff6666;")
             self.explain_label.setText("Could not verify VPN connection.")
             self.connected = False
+            self.ip_label.setText(f"IP: {self.DEFAULT_IP}")
+
+            # Remove status files on disconnect
+            for f in [self.STATUS_FILE, self.IP_FILE]:
+                if os.path.exists(f):
+                    os.remove(f)
             if self.vpn_process:
                 self.vpn_process.terminate()
                 self.vpn_process = None

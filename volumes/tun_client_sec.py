@@ -16,10 +16,12 @@ def verify_hash(data):
     calc_hash = hashlib.sha256(SECRET + packet).digest()
     return (recv_hash == calc_hash), packet
 
-def cleanup(ifname, status_file):
+def cleanup(ifname, status_file, ip_file):
     os.system(f"ip link del {ifname} 2>/dev/null")
-    if os.path.exists(status_file):
-        os.remove(status_file)
+    for path in [status_file, ip_file]:
+        if os.path.exists(path):
+            os.remove(path)
+
 
 # === TUN Setup ===
 TUNSETIFF = 0x400454ca
@@ -32,12 +34,21 @@ ifname = fcntl.ioctl(tun, TUNSETIFF, ifr).decode('UTF-8')[:16].strip('\x00')
 print("TUN interface:", ifname)
 
 os.system(f"ip link set dev {ifname} up")
-os.system(f"ip route add 192.168.60.0/24 dev {ifname}")
+os.system(f"ip route add 192.168.53.0/24 dev {ifname}")
 
 # === UDP Setup ===
 SERVER_IP = "10.9.0.11"
 SERVER_PORT = 9090
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+base_dir = os.path.dirname(__file__)
+ip_file = os.path.join(base_dir, "vpn_ip")
+status_file = os.path.join(base_dir, "vpn_connected")
+
+for path in [status_file, ip_file]:
+    if os.path.exists(path):
+        os.remove(path)
+
 
 # === Step 1: Authenticate
 auth_msg = b'AUTH:' + SECRET
@@ -62,11 +73,13 @@ while True:
 os.system(f"ip addr add {client_ip}/24 dev {ifname}")
 
 # === Step 4: Create status file
-status_file = os.path.join(os.path.dirname(__file__), "vpn_connected")
 with open(status_file, "w") as f:
     f.write("ok")
 
-atexit.register(cleanup, ifname, status_file)
+with open(ip_file, "w") as f:
+    f.write(client_ip)
+
+atexit.register(cleanup, ifname, status_file, ip_file)
 
 # === Step 5: Main loop
 while True:
