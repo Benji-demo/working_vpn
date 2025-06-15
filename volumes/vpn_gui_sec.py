@@ -188,9 +188,12 @@ class VPNApp(QWidget):
 
         QTimer.singleShot(500, self.update_ip)
 
-    def update_ip(self):
-        self.default_ip = "10.9.0.5"
-        self.ip_label.setText(f"IP: {self.default_ip}")
+    def update_ip(self, ip=None):
+        if ip:
+            self.ip_label.setText(f"IP: {ip}")
+        else:
+            self.default_ip = "10.9.0.5"
+            self.ip_label.setText(f"IP: {self.default_ip}")
 
     def toggle_vpn(self):
         password = self.password_input.text().strip()
@@ -298,7 +301,7 @@ class VPNApp(QWidget):
                 self.vpn_process = None
 
     def handle_assigned_ip(self, ip):
-        self.ip_label.setText(f"IP: {ip}")
+        self.update_ip(ip)
 
     def closeEvent(self, event):
         if self.vpn_process:

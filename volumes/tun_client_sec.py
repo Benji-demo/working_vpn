@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
-import os, fcntl, struct, socket, select, hashlib, sys, atexit
+import os, fcntl, struct, socket, select, hashlib, sys, atexit, signal
 from scapy.all import *
 
+# === Secret from stdin ===
 SECRET = sys.stdin.readline().strip().encode()
 
+# === Hash Functions ===
 def add_hash(packet):
     h = hashlib.sha256(SECRET + packet).digest()
     return packet + h
@@ -16,6 +18,7 @@ def verify_hash(data):
     calc_hash = hashlib.sha256(SECRET + packet).digest()
     return (recv_hash == calc_hash), packet
 
+# === Cleanup function ===
 def cleanup(ifname):
     os.system(f"ip link del {ifname} 2>/dev/null")
 
@@ -29,6 +32,19 @@ ifr = struct.pack('16sH', b'bini%d', IFF_TUN | IFF_NO_PI)
 ifname = fcntl.ioctl(tun, TUNSETIFF, ifr).decode('UTF-8')[:16].strip('\x00')
 print("TUN interface:", ifname)
 
+# === Register cleanup ===
+atexit.register(cleanup, ifname)
+
+# === Signal handling for graceful exit ===
+def handle_exit(signum, frame):
+    print(f"\n🔌 Signal {signum} received. Cleaning up and exiting...")
+    cleanup(ifname)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_exit)
+signal.signal(signal.SIGINT, handle_exit)
+
+# === Bring up interface and routing ===
 os.system(f"ip link set dev {ifname} up")
 os.system(f"ip route add 192.168.53.0/24 dev {ifname}")
 
@@ -37,7 +53,7 @@ SERVER_IP = "10.9.0.11"
 SERVER_PORT = 9090
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# === Step 1: Authenticate
+# === Step 1: Authenticate ===
 auth_msg = b'AUTH:' + SECRET
 sock.sendto(add_hash(auth_msg), (SERVER_IP, SERVER_PORT))
 print("🔐 Sent authentication packet")
@@ -59,10 +75,8 @@ while True:
     else:
         print("⏳ Waiting for valid IP assignment...")
 
-# === Step 3: Configure the TUN interface
+# === Step 3: Configure IP ===
 os.system(f"ip addr add {client_ip}/24 dev {ifname}")
-
-atexit.register(cleanup, ifname)
 
 # === Step 4: Main loop ===
 while True:
