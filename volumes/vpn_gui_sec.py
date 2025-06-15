@@ -7,7 +7,6 @@ from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 import sys
 import subprocess
 
-
 class VPNOutputReader(QThread):
     auth_result = pyqtSignal(bool)
     assigned_ip = pyqtSignal(str)
@@ -35,24 +34,6 @@ class VPNOutputReader(QThread):
         self.quit()
         self.wait()
 
-
-class VPNTerminator(QThread):
-    finished = pyqtSignal()
-
-    def __init__(self, process):
-        super().__init__()
-        self.process = process
-
-    def run(self):
-        try:
-            if self.process:
-                self.process.terminate()
-                self.process.wait()
-        except Exception as e:
-            print(f"Error during termination: {e}")
-        self.finished.emit()
-
-
 class VPNApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -64,7 +45,6 @@ class VPNApp(QWidget):
         self.drag_position = None
         self.vpn_process = None
         self.output_thread = None
-        self.terminator_thread = None
 
         self.round_corners()
         self.init_ui()
@@ -103,14 +83,12 @@ class VPNApp(QWidget):
 
         btn_min = QPushButton("-")
         btn_min.setFixedSize(40, 28)
-        btn_min.setStyleSheet("QPushButton { color: white; border-radius: 14px; font-size: 18px; }"
-                              "QPushButton:hover { background: #666; }")
+        btn_min.setStyleSheet("QPushButton { color: white; border-radius: 14px; font-size: 18px; } QPushButton:hover { background: #666; }")
         btn_min.clicked.connect(self.showMinimized)
 
-        btn_close = QPushButton("×")
+        btn_close = QPushButton("\u00d7")
         btn_close.setFixedSize(28, 28)
-        btn_close.setStyleSheet("QPushButton { background: #aa4444; color: white; border-radius: 14px; font-size: 18px; }"
-                                "QPushButton:hover { background: #ff5555; }")
+        btn_close.setStyleSheet("QPushButton { background: #aa4444; color: white; border-radius: 14px; font-size: 18px; } QPushButton:hover { background: #ff5555; }")
         btn_close.clicked.connect(self.close)
 
         title_bar.addWidget(btn_min)
@@ -137,7 +115,7 @@ class VPNApp(QWidget):
         layout.addWidget(self.password_input, alignment=Qt.AlignCenter)
         layout.addSpacing(65)
 
-        self.connect_button = QPushButton("⏻")
+        self.connect_button = QPushButton("\u23fb")
         self.connect_button.setFont(QFont("Arial", 36))
         self.connect_button.setFixedSize(140, 140)
         layout.addWidget(self.connect_button, alignment=Qt.AlignHCenter)
@@ -177,7 +155,7 @@ class VPNApp(QWidget):
 
         layout.addStretch()
 
-        self.ip_label = QLabel("Fetching IP...")
+        self.ip_label = QLabel()
         self.ip_label.setFont(QFont("Arial", 11))
         self.ip_label.setStyleSheet("color: #bfaaff; margin-bottom: 20px;")
         self.ip_label.setAlignment(Qt.AlignCenter)
@@ -241,39 +219,43 @@ class VPNApp(QWidget):
 
                 self.output_thread = VPNOutputReader(self.vpn_process)
                 self.output_thread.auth_result.connect(self.handle_auth_result)
-                self.output_thread.assigned_ip.connect(self.handle_assigned_ip)
+                self.output_thread.assigned_ip.connect(self.update_ip)
                 self.output_thread.start()
 
             except Exception as e:
                 QMessageBox.critical(self, "Connection Error", f"Failed to start VPN client.\n\n{str(e)}")
         else:
+            if self.output_thread:
+                self.output_thread.stop()
+                self.output_thread = None
+
             if self.vpn_process:
-                self.terminator_thread = VPNTerminator(self.vpn_process)
-                self.terminator_thread.finished.connect(self.cleanup_after_disconnect)
-                self.terminator_thread.start()
-            else:
-                self.cleanup_after_disconnect()
+                try:
+                    self.vpn_process.terminate()
+                    try:
+                        self.vpn_process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        self.vpn_process.kill()
+                        self.vpn_process.wait()
+                except Exception as e:
+                    print("Error terminating VPN process:", e)
+                self.vpn_process = None
 
-    def cleanup_after_disconnect(self):
-        if self.output_thread:
-            self.output_thread.stop()
-            self.output_thread = None
-
-        self.vpn_process = None
-        self.status_label.setText("Not Connected")
-        self.status_label.setStyleSheet("color: #ff6666;")
-        self.explain_label.setText("Your internet is not private.")
-        self.connect_button.setStyleSheet("""
-            QPushButton {
-                border-radius: 70px;
-                background-color: #3a3a50;
-                color: #bfaaff;
-            }
-            QPushButton:hover {
-                background-color: #4a4a65;
-            }
-        """)
-        self.connected = False
+            self.status_label.setText("Not Connected")
+            self.status_label.setStyleSheet("color: #ff6666;")
+            self.explain_label.setText("Your internet is not private.")
+            self.connect_button.setStyleSheet("""
+                QPushButton {
+                    border-radius: 70px;
+                    background-color: #3a3a50;
+                    color: #bfaaff;
+                }
+                QPushButton:hover {
+                    background-color: #4a4a65;
+                }
+            """)
+            self.connected = False
+            self.update_ip()
 
     def handle_auth_result(self, success):
         if success:
@@ -304,12 +286,12 @@ class VPNApp(QWidget):
         self.update_ip(ip)
 
     def closeEvent(self, event):
-        if self.vpn_process:
-            self.vpn_process.terminate()
-            self.vpn_process.wait()
         if self.output_thread:
             self.output_thread.stop()
             self.output_thread = None
+        if self.vpn_process:
+            self.vpn_process.terminate()
+            self.vpn_process.wait()
         event.accept()
 
     def mousePressEvent(self, event):
@@ -321,7 +303,6 @@ class VPNApp(QWidget):
         if event.buttons() == Qt.LeftButton and self.drag_position:
             self.move(event.globalPos() - self.drag_position)
             event.accept()
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
